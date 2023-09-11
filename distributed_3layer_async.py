@@ -120,10 +120,6 @@ class DNNGoogleSpeechBatchNorm3Layer(nn.Module):
             self.fc3.weight, self.hidden_layer_index_log2)
 
     def flush(self):
-        #print('update the model based on collected parameters!')
-        # update the model based on the collected parameters.
-        # Here we have to get around pytorch variable by use variable.data,
-        # since leaf variable disallowing in-place operation
         update_tensor_by_update_lists_dim_0(self.fc1.weight.data, self.fc1_weight_partition,
                                             self.hidden_layer_index_log1)
         update_tensor_by_update_lists_dim_0(self.bn1.weight.data, self.bn1_weight_partition,
@@ -165,21 +161,8 @@ def dispatch_model_to_workers(args, partitioned_model, iter, raw_model=None):
                 raw_model.s6[i] = dist.isend(tensor=raw_model.bn2_weight_partition[i], dst=i)
                 raw_model.s7[i] = dist.isend(tensor=raw_model.bn2_bias_partition[i], dst=i)
  
-#        dist.scatter(tensor=partitioned_model.fc1.weight.data, scatter_list=raw_model.fc1_weight_partition, src=0)
-#        dist.scatter(tensor=partitioned_model.fc2.weight.data, scatter_list=raw_model.fc2_weight_partition, src=0)
-#        dist.scatter(tensor=partitioned_model.fc3.weight.data, scatter_list=raw_model.fc3_weight_partition, src=0)
-#        dist.scatter(tensor=partitioned_model.bn1.weight.data, scatter_list=raw_model.bn1_weight_partition, src=0)
-#        dist.scatter(tensor=partitioned_model.bn1.bias.data, scatter_list=raw_model.bn1_bias_partition, src=0)
-#        dist.scatter(tensor=partitioned_model.bn2.weight.data, scatter_list=raw_model.bn2_weight_partition, src=0)
-#        dist.scatter(tensor=partitioned_model.bn2.bias.data, scatter_list=raw_model.bn2_bias_partition, src=0)
+
     else:
-#        dist.scatter(tensor=partitioned_model.fc1.weight.data, scatter_list=[], src=0)
-#        dist.scatter(tensor=partitioned_model.fc2.weight.data, scatter_list=[], src=0)
-#        dist.scatter(tensor=partitioned_model.fc3.weight.data, scatter_list=[], src=0)
-#        dist.scatter(tensor=partitioned_model.bn1.weight.data, scatter_list=[], src=0)
-#        dist.scatter(tensor=partitioned_model.bn1.bias.data, scatter_list=[], src=0)
-#        dist.scatter(tensor=partitioned_model.bn2.weight.data, scatter_list=[], src=0)
-#        dist.scatter(tensor=partitioned_model.bn2.bias.data, scatter_list=[], src=0)
 
         if((partitioned_model.r1 == None or partitioned_model.r1.is_completed()) and
            (partitioned_model.r2 == None or partitioned_model.r2.is_completed()) and
@@ -225,21 +208,8 @@ def push_model_to_parameter_server(args, partitioned_model, raw_model=None):
                 raw_model.r14[i] = dist.irecv(tensor=raw_model.bn2_bias_partition[i], src=i)
 
         
-#        dist.gather(tensor=partitioned_model.fc1.weight.data, gather_list=raw_model.fc1_weight_partition, dst=0)
-#        dist.gather(tensor=partitioned_model.fc2.weight.data, gather_list=raw_model.fc2_weight_partition, dst=0)
-#        dist.gather(tensor=partitioned_model.fc3.weight.data, gather_list=raw_model.fc3_weight_partition, dst=0)
-#        dist.gather(tensor=partitioned_model.bn1.weight.data, gather_list=raw_model.bn1_weight_partition, dst=0)
-#        dist.gather(tensor=partitioned_model.bn1.bias.data, gather_list=raw_model.bn1_bias_partition, dst=0)
-#        dist.gather(tensor=partitioned_model.bn2.weight.data, gather_list=raw_model.bn2_weight_partition, dst=0)
-#        dist.gather(tensor=partitioned_model.bn2.bias.data, gather_list=raw_model.bn2_bias_partition, dst=0)
+
     else:
-#        dist.gather(tensor=partitioned_model.fc1.weight.data, gather_list=[], dst=0)
-#        dist.gather(tensor=partitioned_model.fc2.weight.data, gather_list=[], dst=0)
-#        dist.gather(tensor=partitioned_model.fc3.weight.data, gather_list=[], dst=0)
-#        dist.gather(tensor=partitioned_model.bn1.weight.data, gather_list=[], dst=0)
-#        dist.gather(tensor=partitioned_model.bn1.bias.data, gather_list=[], dst=0)
-#        dist.gather(tensor=partitioned_model.bn2.weight.data, gather_list=[], dst=0)
-#        dist.gather(tensor=partitioned_model.bn2.bias.data, gather_list=[], dst=0)
 
         if((partitioned_model.s8 == None or partitioned_model.s8.is_completed()) and
            (partitioned_model.s9 == None or partitioned_model.s9.is_completed()) and
@@ -269,7 +239,8 @@ def train(args, partitioned_model, raw_model, optimizer, train_loader, epoch, tr
         raw_model.train()
     for i, batch in enumerate(train_loader):
         if i < len(train_loader) // args.world_size:
-            if i % args.repartition_iter == 0:
+#            if i % args.repartition_iter == 0:
+            if epoch-1 == 0:
                 if args.rank == 0:
                     dispatch_model_to_workers(args, partitioned_model, epoch-1, raw_model)
                 else:
@@ -283,9 +254,7 @@ def train(args, partitioned_model, raw_model, optimizer, train_loader, epoch, tr
             i += 1
             train_pred = output.max(1, keepdim=True)[1]  # get the index of the max log-probability
             train_correct = train_pred.eq(target.view_as(train_pred)).sum().item()
-            #if i % args.log_interval == 0:
-            #    print('Train Epoch {} iter {} <Loss: {:.6f}, Accuracy: {:.2f}%>'.format(
-            #        epoch, i, loss.item(), 100. * train_correct / target.shape[0]))
+
             if (i + 1) % args.repartition_iter == 0 or i == len(train_loader) // args.world_size:
                 if args.rank == 0:
                     push_model_to_parameter_server(args, partitioned_model, raw_model)
@@ -296,8 +265,7 @@ def train(args, partitioned_model, raw_model, optimizer, train_loader, epoch, tr
             break
     end_time = time.time()
     elapsed_time = end_time - start_time
-    #print('Node {}: Train Epoch {} total time {:3.2f}s'.format(args.rank, epoch, elapsed_time))
-#    train_time_log[epoch-1] = elapsed_time
+
 
 
 def test(args, raw_model, test_loader, epoch, test_loss_log, test_acc_log):
@@ -323,15 +291,11 @@ def test(args, raw_model, test_loader, epoch, test_loss_log, test_acc_log):
 
     print("Epoch {} Test Loss: {:.6f}; Test Accuracy: {:.2f}.\n".format(epoch, test_loss, test_acc))
      
-#    test_loss_log[epoch - 1] = test_loss
-#    test_acc_log[epoch - 1] = test_acc
 
 
 def worker_process(args):
     assert(args.rank != 0)
-#    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-#                            rank=args.rank, world_size=args.world_size)
-    #device = torch.device('cpu')
+
     torch.cuda.set_device(idr_torch.local_rank)
     device = torch.device('cuda')
     
@@ -343,12 +307,10 @@ def worker_process(args):
     optimizer = torch.optim.SGD(partitioned_model.parameters(), lr=args.lr)
     epochs = args.epochs * args.world_size
     train_time_log = np.zeros(epochs)
-#    for epoch in range(1, epochs + 1):
-#        train(args, partitioned_model, None, optimizer, train_loader, epoch, train_time_log)
+
 
     epoch=1
-    while(True): #partitioned_model.stop==torch.tensor([0])):                                                                                     
-        #print("in worker RANK",args.rank,"model stop",partitioned_model.stop)                                                                    
+    while(True):
         train(args, partitioned_model, None, optimizer, train_loader, epoch, train_time_log)
         epoch+=1
 
@@ -360,8 +322,7 @@ def parameter_server_process(args):
     torch.cuda.set_device(idr_torch.local_rank)
     device = torch.device('cuda')
     
-#    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-#                            rank=args.rank, world_size=args.world_size)
+
     train_set = speech_dataset.train_dataset()
     test_set = speech_dataset.test_dataset()
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True,
@@ -370,7 +331,7 @@ def parameter_server_process(args):
                              drop_last=False)
     model_name = 'DNN_speech_3_layer_BN_' + str(args.epochs) + '_' + str(args.model_size) \
                  + '_cascaded_' + str(args.world_size) + '_' + str(args.repartition_iter)
-    #print("we are going to train from scratch.")
+
     raw_model = DNNGoogleSpeechBatchNorm3Layer(partition_num=args.world_size,
                                                model_size=args.model_size).to(device)
     partitioned_model = DNNGoogleSpeechBatchNorm3Layer(partition_num=1,
@@ -380,9 +341,7 @@ def parameter_server_process(args):
     train_time_log = np.zeros(epochs)
     test_loss_log = np.zeros(epochs)
     test_acc_log = np.zeros(epochs)
-#    for epoch in range(1, epochs + 1):
-#        train(args, partitioned_model, raw_model, optimizer, train_loader, epoch, train_time_log)
-#        test(args, raw_model, test_loader, epoch, test_loss_log, test_acc_log)
+
 
     for epoch in range(1, epochs + 1):
         train(args, partitioned_model, raw_model, optimizer, train_loader, epoch, train_time_log)
@@ -393,10 +352,7 @@ def parameter_server_process(args):
 
 
 
-    np.savetxt('./log/' + model_name + '_train_time.log', train_time_log, fmt='%1.4f', newline=' ')
-    np.savetxt('./log/' + model_name + '_test_loss.log', test_loss_log, fmt='%1.4f', newline=' ')
-    np.savetxt('./log/' + model_name + '_test_acc.log', test_acc_log, fmt='%1.4f', newline=' ')
-#    torch.save(raw_model, './trained_models/' + model_name + '.pth')
+
 
 
 def main():
@@ -424,10 +380,9 @@ def main():
     parser.add_argument('--log-interval', type=int, default=1, metavar='N',
                         help='how many batches to wait before logging training status')
     args = parser.parse_args()
-    # assert(torch.cuda.is_available())
+
 
     dist.init_process_group(backend="mpi")
-#    dist.init_process_group(backend='gloo', init_method='env://', world_size=idr_torch.size, rank=idr_torch.rank)
 
     size = dist.get_world_size()
     rank = dist.get_rank()

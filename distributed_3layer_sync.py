@@ -52,7 +52,7 @@ class DNNGoogleSpeechBatchNorm3Layer(nn.Module):
         return x
 
     def partition_to_list(self):
-        #print("Repartition parameters!")
+
         device = torch.device('cuda')
         shuffle(self.temp_hidden_layer_index1)
         self.hidden_layer_index_log1.clear()
@@ -88,10 +88,6 @@ class DNNGoogleSpeechBatchNorm3Layer(nn.Module):
             self.fc3.weight, self.hidden_layer_index_log2)
 
     def flush(self):
-        #print('update the model based on collected parameters!')
-        # update the model based on the collected parameters.
-        # Here we have to get around pytorch variable by use variable.data,
-        # since leaf variable disallowing in-place operation
         update_tensor_by_update_lists_dim_0(self.fc1.weight.data, self.fc1_weight_partition,
                                             self.hidden_layer_index_log1)
         update_tensor_by_update_lists_dim_0(self.bn1.weight.data, self.bn1_weight_partition,
@@ -109,7 +105,7 @@ class DNNGoogleSpeechBatchNorm3Layer(nn.Module):
 
 
 def dispatch_model_to_workers(args, partitioned_model, iter, raw_model=None):
-    #print('dispatch_model_to_workers called')
+
     if args.rank == 0:
         assert(raw_model is not None)
         if(iter==0):
@@ -134,7 +130,6 @@ def dispatch_model_to_workers(args, partitioned_model, iter, raw_model=None):
 
 
 def push_model_to_parameter_server(args, partitioned_model, raw_model=None):
-    #print('push_model_to_parameter_server called!')
     if args.rank == 0:
         assert(raw_model is not None)
         dist.gather(tensor=partitioned_model.fc1.weight.data, gather_list=raw_model.fc1_weight_partition, dst=0)
@@ -162,11 +157,16 @@ def train(args, partitioned_model, raw_model, optimizer, train_loader, epoch, tr
         raw_model.train()
     for i, batch in enumerate(train_loader):
         if i < len(train_loader) // args.world_size:
-            if i % args.repartition_iter == 0:
+#            if i % args.repartition_iter == 0:
+            if epoch-1 == 0:
                 if args.rank == 0:
                     dispatch_model_to_workers(args, partitioned_model, epoch-1, raw_model)
                 else:
                     dispatch_model_to_workers(args, partitioned_model, epoch-1)
+
+
+
+                    
             data, target = batch['wav'].float().to(device), batch['label'].to(device)
             optimizer.zero_grad()
             output = partitioned_model(data)
@@ -176,9 +176,6 @@ def train(args, partitioned_model, raw_model, optimizer, train_loader, epoch, tr
             i += 1
             train_pred = output.max(1, keepdim=True)[1]  # get the index of the max log-probability
             train_correct = train_pred.eq(target.view_as(train_pred)).sum().item()
-            #if i % args.log_interval == 0:
-                #print('Train Epoch {} iter {} <Loss: {:.6f}, Accuracy: {:.2f}%>'.format(
-                #     epoch, i, loss.item(), 100. * train_correct / target.shape[0]))
             if (i + 1) % args.repartition_iter == 0 or i == len(train_loader) // args.world_size:
                 if args.rank == 0:
                     push_model_to_parameter_server(args, partitioned_model, raw_model)
@@ -189,12 +186,10 @@ def train(args, partitioned_model, raw_model, optimizer, train_loader, epoch, tr
             break
     end_time = time.time()
     elapsed_time = end_time - start_time
-    #print('Node {}: Train Epoch {} total time {:3.2f}s'.format(args.rank, epoch, elapsed_time))
     train_time_log[epoch-1] = elapsed_time
 
 
 def test(args, raw_model, test_loader, epoch, test_loss_log, test_acc_log):
-    # currently only do test on rank0 node.
     assert(args.rank == 0)
     device = torch.device('cuda')
     raw_model.eval()
@@ -218,9 +213,7 @@ def test(args, raw_model, test_loader, epoch, test_loss_log, test_acc_log):
 
 def worker_process(args):
     assert(args.rank != 0)
-#    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-#                            rank=args.rank, world_size=args.world_size)
-    #device = torch.device('cpu')
+
     torch.cuda.set_device(idr_torch.local_rank)
     device = torch.device('cuda')
     
@@ -242,8 +235,7 @@ def parameter_server_process(args):
     torch.cuda.set_device(idr_torch.local_rank)
     device = torch.device('cuda')
     
-#    dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
-#                            rank=args.rank, world_size=args.world_size)
+
     train_set = speech_dataset.train_dataset()
     test_set = speech_dataset.test_dataset()
     train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True,
@@ -252,7 +244,7 @@ def parameter_server_process(args):
                              drop_last=False)
     model_name = 'DNN_speech_3_layer_BN_' + str(args.epochs) + '_' + str(args.model_size) \
                  + '_cascaded_' + str(args.world_size) + '_' + str(args.repartition_iter)
-    #print("we are going to train from scratch.")
+
     raw_model = DNNGoogleSpeechBatchNorm3Layer(partition_num=args.world_size,
                                                model_size=args.model_size).to(device)
     partitioned_model = DNNGoogleSpeechBatchNorm3Layer(partition_num=1,
